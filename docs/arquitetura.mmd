@@ -1,0 +1,15 @@
+---
+title: Arquitetura do Jogo de Corrida 3D
+---
+flowchart TD
+    Main[main.tsx] --> Game[Game.tsx]
+    Game --> |"Renderiza"| ThreeScene[Three.js Scene]
+    Game --> |"Importa"| Car[BasicCar]
+    Game --> |"Importa"| Track[BasicTrack]
+    Game --> |"Hook"| Physics[useBasicPhysics]
+    Game --> |"Hook"| Controls[useBasicControls]
+    Game --> |"Hook"| Camera[useFollowCamera]
+    Game --> |"Futuro"| Hub[Hub]
+    Game --> |"Futuro"| Editor[Editor]
+    ThreeScene --> Car
+    ThreeScene --> Track

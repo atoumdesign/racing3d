@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useState } from 'react';
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
 import { BasicCar } from '../cars/BasicCar';
 import { RedCar } from '../cars/RedCar';
 import { GreenCar } from '../cars/GreenCar';
@@ -36,9 +37,9 @@ const CAR_OPTIONS = [
   { label: 'Passeio', value: 'family' },
 ];
 
-export const Game: React.FC = () => {
+export const Game: React.FC<{ onOpenEditor?: () => void; customCarConfig?: any }> = ({ onOpenEditor, customCarConfig }) => {
   const mountRef = useRef<HTMLDivElement>(null);
-  const carRef = useRef<THREE.Object3D>(null);
+  const carRef = useRef<THREE.Object3D | null>(null);
   const { carState, updatePhysics } = useBasicPhysics();
 
   // Estado para velocímetro, odômetro, FPS e grid
@@ -47,6 +48,7 @@ export const Game: React.FC = () => {
   const [fps, setFps] = useState(0);
   const [showGrid, setShowGrid] = useState(true);
   const [carType, setCarType] = useState('basic');
+  const [customCar, setCustomCar] = useState<any>(customCarConfig || null);
   const [importedCarUrl, setImportedCarUrl] = useState<string | null>(null);
   const [importedCarName, setImportedCarName] = useState<string>('');
   const [importedTrackUrl, setImportedTrackUrl] = useState<string | null>(null);
@@ -57,6 +59,12 @@ export const Game: React.FC = () => {
   // Ref para sempre acessar o valor mais recente de cameraType dentro do loop
   const cameraTypeRef = useRef(cameraType);
   useEffect(() => { cameraTypeRef.current = cameraType; }, [cameraType]);
+  React.useEffect(() => {
+    if (customCarConfig) {
+      setCustomCar(customCarConfig);
+      setCarType('custom'); // Seleciona automaticamente o carro personalizado
+    }
+  }, [customCarConfig]);
   const [controlConfig, setControlConfig] = React.useState<Partial<ControlConfig>>();
   // Debounce para evitar múltiplas trocas de câmera por pressionamento
   const cameraSwitching = useRef(false);
@@ -80,36 +88,58 @@ export const Game: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cameraType]);
 
+  // --- Monta cena e renderer apenas uma vez ---
+  const sceneRef = useRef<THREE.Scene>();
+  const rendererRef = useRef<THREE.WebGLRenderer>();
+  const gridRef = useRef<THREE.GridHelper>();
+  const carObjRef = useRef<THREE.Object3D | null>(null);
+  const lastPositionRef = useRef<THREE.Vector3>(new THREE.Vector3());
+  const totalDistanceRef = useRef<number>(0);
+  const [trackLoaded, setTrackLoaded] = useState(false);
+
   useEffect(() => {
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xf0f0f0);
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    mountRef.current?.appendChild(renderer.domElement);
+    if (!sceneRef.current) {
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0xf0f0f0);
+      sceneRef.current = scene;
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      rendererRef.current = renderer;
+      mountRef.current?.appendChild(renderer.domElement);
 
-    // Luz
-    const light = new THREE.DirectionalLight(0xffffff, 1);
-    light.position.set(10, 10, 10);
-    scene.add(light);
+      // Luz
+      const light = new THREE.DirectionalLight(0xffffff, 1);
+      light.position.set(10, 10, 10);
+      scene.add(light);
 
-    // Plano infinito
-    const planeGeometry = new THREE.PlaneGeometry(10000, 10000);
-    const planeMaterial = new THREE.MeshPhongMaterial({ color: 0xe0e0e0, depthWrite: true });
-    const plane = new THREE.Mesh(planeGeometry, planeMaterial);
-    plane.rotation.x = -Math.PI / 2;
-    plane.position.y = -0.01;
-    plane.receiveShadow = true;
-    scene.add(plane);
+      // Plano infinito
+      const planeGeometry = new THREE.PlaneGeometry(10000, 10000);
+      const planeMaterial = new THREE.MeshPhongMaterial({ color: 0xe0e0e0, depthWrite: true });
+      const plane = new THREE.Mesh(planeGeometry, planeMaterial);
+      plane.rotation.x = -Math.PI / 2;
+      plane.position.y = -0.01;
+      plane.receiveShadow = true;
+      scene.add(plane);
 
-    // Grid helper
-    const grid = new THREE.GridHelper(10000, 100, 0x888888, 0xcccccc);
-    grid.position.y = 0.001;
-    scene.add(grid);
+      // Grid helper
+      const grid = new THREE.GridHelper(10000, 100, 0x888888, 0xcccccc);
+      grid.position.y = 0.001;
+      scene.add(grid);
+      gridRef.current = grid;
+    }
+    return () => {
+      rendererRef.current?.dispose();
+      if (mountRef.current && rendererRef.current?.domElement)
+        mountRef.current.removeChild(rendererRef.current.domElement);
+    };
+  }, []);
 
-    // Pista
+  // --- Atualiza pista ---
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
     let track: THREE.Object3D;
-    let trackLoaded = false;
-    async function setupTrack() {
+    (async () => {
       if (importedTrackUrl) {
         try {
           track = await loadGLTFTrack(importedTrackUrl);
@@ -123,37 +153,97 @@ export const Game: React.FC = () => {
         track.name = 'Pista Básica';
       }
       scene.traverse(obj => {
-        if (['Pista Importada', 'Pista Básica'].includes(obj.name)) {
+        if (["Pista Importada", "Pista Básica"].includes(obj.name)) {
           scene.remove(obj);
         }
       });
       scene.add(track);
-      trackLoaded = true;
-    }
-    setupTrack();
+      setTrackLoaded(true);
+    })();
+  }, [importedTrackUrl, importedTrackName]);
 
-    // Carro
-    let car: THREE.Object3D;
-    let carLoaded = false;
-    let disposed = false;
-    let lastPosition: THREE.Vector3;
-    let totalDistance = 0;
-
-    async function setupCar() {
-      // Remove carros anteriores
+  // --- Atualiza carro ---
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene || !trackLoaded) return;
+    // Limpeza robusta: remove todos os objetos do grupo/carro anterior
+    const carNames = [
+      'Importado', 'Carro Básico', 'Carro Vermelho', 'Carro Verde', 'Carro Amarelo',
+      'Fusca', 'Taxi', 'Ônibus', 'Caminhão', 'Fiat Uno', 'Esportivo', 'Passeio', 'Carro Personalizado'
+    ];
+    let removed = true;
+    while (removed) {
+      removed = false;
       scene.traverse(obj => {
-        if ([
-          'Importado', 'Carro Básico', 'Carro Vermelho', 'Carro Verde', 'Carro Amarelo',
-          'Fusca', 'Taxi', 'Ônibus', 'Caminhão', 'Fiat Uno', 'Esportivo', 'Passeio'
-        ].includes(obj.name)) {
-          scene.remove(obj);
+        if (carNames.includes(obj.name) && obj.parent) {
+          obj.parent.remove(obj);
+          removed = true;
         }
       });
-      if (importedCarUrl) {
+    }
+    let car: THREE.Object3D;
+    if (carType === 'custom' && customCar) {
+      car = new THREE.Group();
+      car.name = 'Carro Personalizado';
+      if (customCar.parts && Array.isArray(customCar.parts)) {
+        const loader = new GLTFLoader();
+        (async () => {
+          for (const part of customCar.parts) {
+            if (part.fileName) {
+              try {
+                const url = `/parts/${part.fileName}`;
+                // eslint-disable-next-line no-await-in-loop
+                const gltf = await loader.loadAsync(url);
+                let mesh: THREE.Object3D;
+                if (part.meshType === 'child' && gltf.scene.children.length === 1 && (gltf.scene.children[0] as any).isMesh) {
+                  mesh = gltf.scene.children[0];
+                } else {
+                  mesh = gltf.scene;
+                }
+                mesh.traverse(obj => {
+                  if (obj instanceof THREE.Mesh) {
+                    obj.material = new THREE.MeshStandardMaterial({ color: part.color || 0x222222 });
+                  }
+                });
+                if (part.position) mesh.position.set(part.position.x, part.position.y, part.position.z);
+                if (part.rotation) mesh.rotation.set(part.rotation.x, part.rotation.y, part.rotation.z);
+                if (part.scale) mesh.scale.set(part.scale.x, part.scale.y, part.scale.z);
+                mesh.name = part.name || 'Parte';
+                car.add(mesh);
+              } catch (e) {
+                alert(`Arquivo da peça não encontrado: ${part.fileName}\nColoque o arquivo em public/parts/ e recarregue a página.`);
+                const mesh = new THREE.Mesh(
+                  new THREE.BoxGeometry(1, 1, 1),
+                  new THREE.MeshStandardMaterial({ color: part.color || 0x222222 })
+                );
+                if (part.position) mesh.position.set(part.position.x, part.position.y, part.position.z);
+                if (part.rotation) mesh.rotation.set(part.rotation.x, part.rotation.y, part.rotation.z);
+                if (part.scale) mesh.scale.set(part.scale.x, part.scale.y, part.scale.z);
+                mesh.name = part.name || 'Parte';
+                car.add(mesh);
+              }
+            } else {
+              const mesh = new THREE.Mesh(
+                new THREE.BoxGeometry(1, 1, 1),
+                new THREE.MeshStandardMaterial({ color: part.color || 0x222222 })
+              );
+              if (part.position) mesh.position.set(part.position.x, part.position.y, part.position.z);
+              if (part.rotation) mesh.rotation.set(part.rotation.x, part.rotation.y, part.rotation.z);
+              if (part.scale) mesh.scale.set(part.scale.x, part.scale.y, part.scale.z);
+              mesh.name = part.name || 'Parte';
+              car.add(mesh);
+            }
+          }
+          carObjRef.current = car;
+          scene.add(car);
+          lastPositionRef.current = car.position.clone();
+        })();
+      }
+    } else if (importedCarUrl) {
+      (async () => {
         try {
           car = await loadGLTFCar(importedCarUrl);
           car.name = importedCarName || 'Importado';
-          // Centralizar e ajustar escala do modelo importado
           const box = new THREE.Box3().setFromObject(car);
           const center = box.getCenter(new THREE.Vector3());
           car.position.sub(center);
@@ -166,77 +256,84 @@ export const Game: React.FC = () => {
           const newBox = new THREE.Box3().setFromObject(car);
           const minY = newBox.min.y;
           if (minY !== 0) car.position.y -= minY;
+          carObjRef.current = car;
+          scene.add(car);
+          lastPositionRef.current = car.position.clone();
         } catch (e) {
           car = BasicCar();
           car.name = 'Carro Básico';
+          carObjRef.current = car;
+          scene.add(car);
+          lastPositionRef.current = car.position.clone();
         }
-      } else {
-        switch (carType) {
-          case 'red':
-            car = RedCar();
-            car.name = 'Carro Vermelho';
-            break;
-          case 'green':
-            car = GreenCar();
-            car.name = 'Carro Verde';
-            break;
-          case 'yellow':
-            car = YellowCar();
-            car.name = 'Carro Amarelo';
-            break;
-          case 'fusca':
-            car = FuscaCar();
-            car.name = 'Fusca';
-            break;
-          case 'taxi':
-            car = TaxiCar();
-            car.name = 'Taxi';
-            break;
-          case 'bus':
-            car = BusCar();
-            car.name = 'Ônibus';
-            break;
-          case 'truck':
-            car = TruckCar();
-            car.name = 'Caminhão';
-            break;
-          case 'uno':
-            car = UnoCar();
-            car.name = 'Fiat Uno';
-            break;
-          case 'sport':
-            car = SportCar();
-            car.name = 'Esportivo';
-            break;
-          case 'family':
-            car = FamilyCar();
-            car.name = 'Passeio';
-            break;
-          case 'basic':
-          default:
-            car = BasicCar();
-            car.name = 'Carro Básico';
-        }
+      })();
+    } else {
+      switch (carType) {
+        case 'red':
+          car = RedCar();
+          car.name = 'Carro Vermelho';
+          break;
+        case 'green':
+          car = GreenCar();
+          car.name = 'Carro Verde';
+          break;
+        case 'yellow':
+          car = YellowCar();
+          car.name = 'Carro Amarelo';
+          break;
+        case 'fusca':
+          car = FuscaCar();
+          car.name = 'Fusca';
+          break;
+        case 'taxi':
+          car = TaxiCar();
+          car.name = 'Taxi';
+          break;
+        case 'bus':
+          car = BusCar();
+          car.name = 'Ônibus';
+          break;
+        case 'truck':
+          car = TruckCar();
+          car.name = 'Caminhão';
+          break;
+        case 'uno':
+          car = UnoCar();
+          car.name = 'Fiat Uno';
+          break;
+        case 'sport':
+          car = SportCar();
+          car.name = 'Esportivo';
+          break;
+        case 'family':
+          car = FamilyCar();
+          car.name = 'Passeio';
+          break;
+        case 'basic':
+        default:
+          car = BasicCar();
+          car.name = 'Carro Básico';
       }
-      carRef.current = car;
+      carObjRef.current = car;
       scene.add(car);
-      lastPosition = car.position.clone();
-      carLoaded = true;
+      lastPositionRef.current = car.position.clone();
     }
+  }, [carType, customCar, importedCarUrl, importedCarName, trackLoaded]);
 
-    setupCar();
-
-    // FPS
-    let frames = 0;
-    let lastFpsUpdate = performance.now();
-
-    // Loop de animação
+  // --- Loop de animação ---
+  useEffect(() => {
+    let disposed = false;
     const animate = () => {
+      if (disposed) return;
       requestAnimationFrame(animate);
-      if (!carLoaded || !trackLoaded) return;
+      const scene = sceneRef.current;
+      const renderer = rendererRef.current;
+      const car = carObjRef.current;
+      const grid = gridRef.current;
+      if (!scene || !renderer || !car) return;
       updatePhysics(car, controls);
       updateCamera(camera, car);
-      grid.visible = showGrid;
+      if (grid) grid.visible = showGrid;
       renderer.render(scene, camera);
 
       // Velocímetro (km/h)
@@ -245,10 +342,10 @@ export const Game: React.FC = () => {
       setSpeed(Number(speedKmh.toFixed(1)));
 
       // Odômetro (km)
-      const delta = car.position.distanceTo(lastPosition);
-      totalDistance += delta;
-      setDistance(Number((totalDistance / 1000).toFixed(3)));
-      lastPosition.copy(car.position);
+      const delta = car.position.distanceTo(lastPositionRef.current);
+      totalDistanceRef.current += delta;
+      setDistance(Number((totalDistanceRef.current / 1000).toFixed(3)));
+      lastPositionRef.current.copy(car.position);
 
       // FPS
       frames++;
@@ -259,14 +356,11 @@ export const Game: React.FC = () => {
         frames = 0;
       }
     };
+    let frames = 0;
+    let lastFpsUpdate = performance.now();
     animate();
-
-    return () => {
-      disposed = true;
-      renderer.dispose();
-      mountRef.current?.removeChild(renderer.domElement);
-    };
-  }, [showGrid, carType, importedCarUrl, importedTrackUrl]);
+    return () => { disposed = true; };
+  }, [controls, camera, showGrid]);
 
   return (
     <>
@@ -281,7 +375,7 @@ export const Game: React.FC = () => {
         cameraType={cameraType}
         setCameraType={setCameraType}
         controlConfig={config}
-        setControlConfig={setConfig}
+        setControlConfig={cfg => setConfig(prev => ({ ...prev, ...cfg }))}
         showGrid={showGrid}
         setShowGrid={setShowGrid}
         carType={carType}
@@ -292,6 +386,8 @@ export const Game: React.FC = () => {
         importedTrackName={importedTrackName}
         setImportedTrackName={setImportedTrackName}
         setImportedTrackUrl={setImportedTrackUrl}
+        onOpenEditor={onOpenEditor}
+        hasCustomCar={!!customCar}
       />
     </>
   );

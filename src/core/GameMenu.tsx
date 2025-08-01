@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import styles from './GameMenu.module.css';
 import type { CameraType } from '../camera/useFollowCamera';
 import type { ControlConfig } from '../controls/useBasicControls';
 
-interface GameMenuProps {
+export interface GameMenuProps {
   cameraType: CameraType;
   setCameraType: (type: CameraType) => void;
   controlConfig: ControlConfig;
@@ -18,26 +18,45 @@ interface GameMenuProps {
   importedTrackName: string;
   setImportedTrackName: (name: string) => void;
   setImportedTrackUrl: (url: string | null) => void;
+  onOpenEditor?: () => void;
+  hasCustomCar?: boolean;
 }
 
-export function GameMenu({
-  cameraType,
-  setCameraType,
-  controlConfig,
-  setControlConfig,
-  showGrid,
-  setShowGrid,
-  carType,
-  setCarType,
-  importedCarName,
-  setImportedCarName,
-  setImportedCarUrl,
-  importedTrackName,
-  setImportedTrackName,
-  setImportedTrackUrl
-}: GameMenuProps) {
+function usePublicFiles(folder: string) {
+  const [files, setFiles] = useState<string[]>([]);
+  useEffect(() => {
+    fetch(`/${folder}/index.json`)
+      .then(res => res.json())
+      .then(setFiles)
+      .catch(() => setFiles([]));
+  }, [folder]);
+  return files;
+}
+
+export function GameMenu(props: GameMenuProps) {
+  const {
+    cameraType,
+    setCameraType,
+    controlConfig,
+    setControlConfig,
+    showGrid,
+    setShowGrid,
+    carType,
+    setCarType,
+    importedCarName,
+    setImportedCarName,
+    setImportedCarUrl,
+    importedTrackName,
+    setImportedTrackName,
+    setImportedTrackUrl,
+    onOpenEditor,
+    hasCustomCar
+  } = props;
   const [editing, setEditing] = useState<keyof ControlConfig | null>(null);
   const [controlsOpen, setControlsOpen] = useState(false);
+  const carFiles = usePublicFiles('cars');
+  const trackFiles = usePublicFiles('tracks');
+
   React.useEffect(() => {
     if (!editing) return;
     const handler = (e: KeyboardEvent) => {
@@ -71,6 +90,13 @@ export function GameMenu({
 
   return (
     <div className={styles.menuRoot}>
+      <div className={styles.menuSection}>
+        {onOpenEditor && (
+          <button className={styles.menuButton} onClick={onOpenEditor}>
+            Editor de Carros
+          </button>
+        )}
+      </div>
       <div className={styles.menuSection}>
         <label htmlFor="track-import">Importar pista:</label>
         <input
@@ -107,6 +133,7 @@ export function GameMenu({
           <option value="uno">Fiat Uno</option>
           <option value="sport">Esportivo</option>
           <option value="family">Passeio</option>
+          {hasCustomCar && <option value="custom">Carro Personalizado</option>}
           {importedCarName && <option value="imported">{importedCarName} (importado)</option>}
         </select>
         <input
@@ -116,6 +143,47 @@ export function GameMenu({
           className={styles.importCarInput}
           title="Importar modelo de carro (.gltf ou .glb)"
         />
+      </div>
+      <div className={styles.menuSection}>
+        {carFiles.length > 0 && (
+          <div className={styles.menuSection}>
+            <label htmlFor="car-public-select">Carro (arquivo):</label>
+            <select
+              id="car-public-select"
+              className={styles.menuSelect}
+              value={carType.startsWith('public:') ? carType : ''}
+              onChange={e => {
+                setCarType(e.target.value);
+                setImportedCarUrl(`/cars/${e.target.value.replace('public:', '')}`);
+                setImportedCarName(e.target.value.replace('public:', ''));
+              }}
+            >
+              <option value="">Selecione um carro</option>
+              {carFiles.map(f => (
+                <option key={f} value={`public:${f}`}>{f}</option>
+              ))}
+            </select>
+          </div>
+        )}
+        {trackFiles.length > 0 && (
+          <div className={styles.menuSection}>
+            <label htmlFor="track-public-select">Pista (arquivo):</label>
+            <select
+              id="track-public-select"
+              className={styles.menuSelect}
+              value={importedTrackName && importedTrackName.startsWith('public:') ? importedTrackName : ''}
+              onChange={e => {
+                setImportedTrackUrl(`/tracks/${e.target.value.replace('public:', '')}`);
+                setImportedTrackName(`public:${e.target.value.replace('public:', '')}`);
+              }}
+            >
+              <option value="">Selecione uma pista</option>
+              {trackFiles.map(f => (
+                <option key={f} value={`public:${f}`}>{f}</option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
       <div className={styles.menuTitle}>Configurações</div>
       <div className={styles.menuSection}>

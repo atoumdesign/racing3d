@@ -141,3 +141,6 @@ vite.config.ts.timestamp-*
 =======
 vite.config.ts.timestamp-*
 >>>>>>> 93d5602 (first)
+
+
+public/tracks/*.glb

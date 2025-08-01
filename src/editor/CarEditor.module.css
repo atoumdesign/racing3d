@@ -1,0 +1,41 @@
+/* Estilos para os botões e canvas do editor de carros */
+.car-editor-export-btn {
+  margin-top: 16px;
+}
+.car-editor-use-btn {
+  margin-top: 16px;
+  margin-left: 8px;
+}
+.car-editor-canvas {
+  width: 600px;
+  height: 400px;
+  background: #e0e0e0;
+}
+.car-editor-flex {
+  display: flex;
+  gap: 24px;
+}
+.car-editor-section {
+  margin-bottom: 12px;
+}
+.car-editor-input {
+  margin-left: 8px;
+}
+.car-editor-back-btn {
+  margin-bottom: 16px;
+}
+.car-editor-part-item {
+  margin-bottom: 8px;
+}
+.car-editor-part-btn {
+  /* Adicione estilos desejados */
+}
+.car-editor-coord-label {
+  margin-left: 8px;
+}
+.car-editor-coord-input {
+  width: 60px;
+}
+.car-editor-scale-container {
+  margin-top: 8px;
+}
